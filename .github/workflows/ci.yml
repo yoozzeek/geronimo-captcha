@@ -21,7 +21,7 @@ jobs:
         run: cargo clippy --all-features -- -D warnings
 
       - name: Run Tests
-        run: cargo test --all-features
+        run: cargo test --all-features --release
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
