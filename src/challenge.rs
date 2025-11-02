@@ -308,8 +308,6 @@ mod tests {
     use super::*;
     use base64::engine::general_purpose;
     use std::collections::HashSet;
-    use std::fs;
-    use std::path::Path;
     use std::thread::sleep;
     use std::time::Duration;
 
@@ -317,7 +315,7 @@ mod tests {
     const SECRET: &[u8] = b"secret-key";
 
     fn load_sample_image() -> Vec<u8> {
-        fs::read("assets/sample9.jpg").expect("Missing assets/sample9.jpg")
+        include_bytes!("../assets/sample1.jpg").to_vec()
     }
 
     fn generate_challenge() -> CaptchaChallenge {
@@ -341,10 +339,10 @@ mod tests {
             CHALLENGE_TTL,
         );
 
-        challenge
-            .sprite
-            .save(Path::new("examples/exampleX.jpg"))
-            .expect("Failed to save generated image");
+        // challenge
+        //     .sprite
+        //     .save(Path::new("examples/exampleX.jpg"))
+        //     .expect("Failed to save generated image");
 
         assert!(result, "Challenge verification failed for correct index");
     }
