@@ -44,7 +44,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let secret = "your-secret-key".to_string();
     let ttl_secs = 60;
     let noise = NoiseOptions::default();
-    let gen = GenerationOptions { cell_size: 150, jpeg_quality: 20, limits: None };
+    let gen = GenerationOptions {
+        cell_size: 150,
+        jpeg_quality: 20,
+        limits: None,
+    };
     let registry = Arc::new(ChallengeInMemoryRegistry::new(ttl_secs, 3));
 
     let mgr = CaptchaManager::new(secret, ttl_secs, noise, Some(registry), gen);
@@ -71,7 +75,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let secret = "your-secret-key".to_string();
     let ttl_secs = 60;
     let noise = NoiseOptions::default();
-    let gen = GenerationOptions { cell_size: 150, jpeg_quality: 20, limits: None };
+    let gen = GenerationOptions {
+        cell_size: 150,
+        jpeg_quality: 20,
+        limits: None,
+    };
     let mgr = CaptchaManager::new(secret, ttl_secs, noise, None, gen);
 
     // Normally you get these from the client
