@@ -317,7 +317,7 @@ mod tests {
     const SECRET: &[u8] = b"secret-key";
 
     fn load_sample_image() -> Vec<u8> {
-        fs::read("assets/sample9.jpg").expect("Missing assets/sample1.jpg")
+        fs::read("assets/sample9.jpg").expect("Missing assets/sample9.jpg")
     }
 
     fn generate_challenge() -> CaptchaChallenge {
