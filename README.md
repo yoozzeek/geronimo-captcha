@@ -1,6 +1,6 @@
 # geronimo-captcha
 
-[![CI](https://github.com/yoozzeek/actix-csrf-middleware/actions/workflows/ci.yml/badge.svg)](https://github.com/yoozzeek/geronimo-captcha/actions/workflows/ci.yml)
+[![CI](https://github.com/yoozzeek/geronimo-captcha/actions/workflows/ci.yml/badge.svg)](https://github.com/yoozzeek/geronimo-captcha/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/geronimo-captcha.svg)](https://crates.io/crates/geronimo-captcha)
 [![Docs.rs](https://docs.rs/geronimo-captcha/badge.svg)](https://docs.rs/geronimo-captcha)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache2-yellow.svg)](./LICENSE)
