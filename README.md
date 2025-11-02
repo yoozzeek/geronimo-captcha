@@ -18,9 +18,7 @@ Confuses bots, but delights humans.
 
 ### Challenge examples
 
-<img src="./examples/example1.jpg" alt="Challenge example 1" width="280"/>
-<img src="./examples/example2.jpg" alt="Challenge example 2" width="280"/>
-<img src="./examples/example3.jpg" alt="Challenge example 3" width="280"/>
+<img src="./examples/examples-sprite.jpg" alt="Challenge examples" width="580"/>
 
 ## Todos
 
