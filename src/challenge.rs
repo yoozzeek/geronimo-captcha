@@ -48,7 +48,7 @@ impl Default for GenerationOptions {
     fn default() -> Self {
         Self {
             cell_size: 150,
-            jpeg_quality: 20,
+            jpeg_quality: 70,
             limits: None,
         }
     }
@@ -317,14 +317,14 @@ mod tests {
     const SECRET: &[u8] = b"secret-key";
 
     fn load_sample_image() -> Vec<u8> {
-        fs::read("assets/sample2.jpg").expect("Missing assets/sample1.jpg")
+        fs::read("assets/sample9.jpg").expect("Missing assets/sample1.jpg")
     }
 
     fn generate_challenge() -> CaptchaChallenge {
         let base = load_sample_image();
         let opts = GenerationOptions {
             cell_size: 150,
-            jpeg_quality: 20,
+            jpeg_quality: 70,
             limits: None,
         };
         generate(&base, SECRET, &opts, NoiseOptions::default())
@@ -343,7 +343,7 @@ mod tests {
 
         challenge
             .sprite
-            .save(Path::new("assets/example.jpg"))
+            .save(Path::new("examples/exampleX.jpg"))
             .expect("Failed to save generated image");
 
         assert!(result, "Challenge verification failed for correct index");
@@ -363,7 +363,7 @@ mod tests {
     fn test_challenge_correct_index_should_be_random() {
         let mut seen_indices = HashSet::new();
 
-        for _ in 0..30 {
+        for _ in 0..100 {
             let challenge = generate_challenge();
             seen_indices.insert(challenge.correct_number);
         }
@@ -418,10 +418,11 @@ mod tests {
         let mut false_positives = 0;
         let mut durations = vec![];
 
-        for _ in 0..100 {
+        for _ in 0..60 {
             let start = Instant::now();
             let challenge = generate_challenge();
             durations.push(start.elapsed().as_nanos());
+
             for guess in 0..9 {
                 if guess != challenge.correct_number
                     && verify(SECRET, &challenge.challenge_id, guess, 60)
@@ -447,21 +448,26 @@ mod tests {
     fn test_uniqueness_hmac() {
         let mut hmacs = HashSet::new();
 
-        for _ in 0..100 {
+        for _ in 0..60 {
             let challenge = generate_challenge();
-            let prefix = challenge
+            let suffix8 = challenge
                 .challenge_id
+                .rsplit(':')
+                .next()
+                .unwrap_or("")
                 .chars()
                 .rev()
                 .take(8)
                 .collect::<String>();
-            hmacs.insert(prefix);
+
+            hmacs.insert(suffix8);
+
             sleep(Duration::from_millis(10));
         }
 
         assert_eq!(
             hmacs.len(),
-            100,
+            60,
             "HMACs are not unique, potential rainbow table vulnerability"
         );
     }

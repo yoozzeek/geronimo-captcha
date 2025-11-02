@@ -1,5 +1,5 @@
 [package]
-name = "captcha-lib"
+name = "geronimo-captcha"
 version = "0.2.0"
 edition = "2024"
 
@@ -25,3 +25,12 @@ tracing = "0.1"
 once_cell = "1"
 zeroize = { version = "1", default-features = true }
 rayon = { version = "1", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1"
+
+[[bench]]
+name = "captcha"
+path = "benches/generate_verify.rs"
+harness = false
