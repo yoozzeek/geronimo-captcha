@@ -23,7 +23,7 @@ Confuses bots, but delights humans.
 ## Todos
 
 - [x] Captcha core, image and sprite generation helpers + in-memory challenge registry
-- [ ] Publish crate on crates.io
+- [x] Publish crate on crates.io
 - [ ] Code examples, demo webpage
 - [ ] Custom fonts and sample sets
 - [ ] Redis challenge registry implementation
