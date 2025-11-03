@@ -20,7 +20,7 @@ Confuses bots, but delights humans.
 
 <img src="./examples/examples-sprite.jpg" alt="Challenge examples" width="580"/>
 
-## Todos
+## Roadmap
 
 - [x] Captcha core, image and sprite generation helpers
 - [x] In-memory challenge registry impl
