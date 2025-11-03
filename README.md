@@ -22,15 +22,14 @@ Confuses bots, but delights humans.
 
 ## Todos
 
-- [x] Captcha core, image and sprite generation helpers + in-memory challenge registry
+- [x] Captcha core, image and sprite generation helpers
+- [x] In-memory challenge registry impl
 - [x] Publish crate on crates.io
 - [ ] Code examples, demo webpage
 - [ ] Custom fonts and sample sets
-- [ ] Redis challenge registry implementation
+- [ ] Redis challenge registry impl
 
-## Quick start
-
-### Generate
+## Generate and verify
 
 ```rust
 use std::sync::Arc;
@@ -59,32 +58,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("img_src prefix: {}", &img_src[..32.min(img_src.len())]);
     println!("challenge_id: {}", challenge_id);
 
-    Ok(())
-}
-```
+    // Normally you get these from the client in your API handlers/routes
+    let client_challenge_id = "nonce:1730534400:BASE64_HMAC".to_string();
+    let client_choice_idx: u8 = 7;
 
-### Verify
-
-```rust
-use geronimo_captcha::{CaptchaManager, GenerationOptions, NoiseOptions};
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Must use the same secret and TTL as on generation side
-    let secret = "your-secret-key".to_string();
-    let ttl_secs = 60;
-    let noise = NoiseOptions::default();
-    let gen = GenerationOptions {
-        cell_size: 150,
-        jpeg_quality: 20,
-        limits: None,
-    };
-    let mgr = CaptchaManager::new(secret, ttl_secs, noise, None, gen);
-
-    // Normally you get these from the client
-    let challenge_id = "nonce:1730534400:BASE64_HMAC".to_string();
-    let user_choice: u8 = 7;
-
-    let ok = mgr.verify_challenge(&challenge_id, user_choice)?;
+    let ok = mgr.verify_challenge(&client_challenge_id, client_choice_idx)?;
     println!("verified: {ok}");
 
     Ok(())
