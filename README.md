@@ -24,8 +24,8 @@ Confuses bots, but delights humans.
 
 - [x] Captcha core, image and sprite generation helpers
 - [x] In-memory challenge registry impl
-- [ ] Sprite as binary (in addition to base64)
-- [ ] WebP format (in addition to JPEG)
+- [x] Sprite as binary (in addition to base64)
+- [x] WebP format (in addition to JPEG)
 - [ ] Code examples, demo webpage
 - [ ] Custom fonts and sample sets
 - [ ] Redis challenge registry impl
@@ -33,9 +33,10 @@ Confuses bots, but delights humans.
 ## Generate and verify
 
 ```rust
-use std::sync::Arc;
 use geronimo_captcha::{
-    CaptchaManager, ChallengeInMemoryRegistry, GenerationOptions, NoiseOptions,
+    CaptchaManager, ChallengeInMemoryRegistry,
+    GenerationOptions, NoiseOptions,
+    SpriteFormat, SpriteUri, SpriteBinary
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -44,16 +45,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let noise = NoiseOptions::default();
     let gen = GenerationOptions {
         cell_size: 150,
-        jpeg_quality: 20,
+        sprite_format: SpriteFormat::Jpeg {
+            quality: 20,
+        },
         limits: None,
     };
-    let registry = Arc::new(ChallengeInMemoryRegistry::new(ttl_secs, 3));
+    let registry = std::sync::Arc::new(ChallengeInMemoryRegistry::new(ttl_secs, 3));
 
     let mgr = CaptchaManager::new(secret, ttl_secs, noise, Some(registry), gen);
-    let challenge = mgr.generate_challenge()?;
+    let challenge = mgr.generate_challenge::<SpriteUri>()?;
+
+    // Generate sprite (as binary) if needed
+    // let challenge = mgr.generate_challenge_with::<SpriteBinary>()?;
+    // let img_binary = challenge.sprite.bytes;
 
     // Render to client
-    let img_src = challenge.sprite_uri;         // data:image/jpeg;base64,...
+    let img_src = challenge.sprite.0;           // data:image/*;base64,...
     let challenge_id = challenge.challenge_id;  // send/store with form
 
     println!("img_src prefix: {}", &img_src[..32.min(img_src.len())]);
@@ -68,6 +75,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+```
+
+## Benchmarks
+
+- JPEG generate: ~6.7 ms / ~11.1 ms / ~17.5 ms
+- WebP generate: ~11.5 ms / ~21.0 ms / ~33.1 ms
+- Verify: ~2.5 µs
+
+With feature `parallel` enabled: ~5.0 ms / ~9.6 ms / ~15.6 ms (JPEG) and ~10.7 ms / ~20.0 ms / ~32.6 ms (WebP).
+
+_Apple M3 Max_
+
+How to run:
+
+```bash
+cargo bench --bench captcha -- --noplot
+cargo bench --features parallel --bench captcha -- --noplot
 ```
 
 ## License
