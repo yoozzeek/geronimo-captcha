@@ -1,6 +1,7 @@
 use crate::error::{CaptchaError, Result};
-use crate::image_ops::NoiseOptions;
+use crate::image::NoiseOptions;
 use crate::registry::ChallengeRegistry;
+use crate::sprite::{SpriteFormat, SpriteTarget};
 use crate::{RegistryCheckResult, challenge};
 
 use rand::prelude::IndexedRandom;
@@ -44,13 +45,13 @@ impl CaptchaManager {
         }
     }
 
-    pub fn generate_challenge(&self) -> Result<challenge::CaptchaChallenge> {
+    pub fn generate_challenge<T: SpriteTarget>(&self) -> Result<challenge::CaptchaChallenge<T>> {
         let sample_image = match SAMPLE_IMAGES.choose(&mut rng()) {
             Some(img) => *img,
             None => return Err(CaptchaError::Internal("no sample images available".into())),
         };
 
-        let challenge = challenge::generate(
+        let challenge = challenge::generate::<T>(
             sample_image,
             self.secret.as_slice(),
             &self.gen_opts,
@@ -61,9 +62,20 @@ impl CaptchaManager {
             reg.register(&challenge.challenge_id);
         }
 
+        let (format, quality, lossless) = match self.gen_opts.sprite_format {
+            SpriteFormat::Jpeg { quality } => ("jpeg", quality, false),
+            SpriteFormat::Webp { quality, lossless } => (
+                if lossless { "webp-lossless" } else { "webp" },
+                quality,
+                lossless,
+            ),
+        };
+
         info!(
             cell_size = self.gen_opts.cell_size,
-            jpeg_quality = self.gen_opts.jpeg_quality,
+            format = format,
+            quality = quality,
+            lossless = lossless,
             "captcha generated"
         );
 

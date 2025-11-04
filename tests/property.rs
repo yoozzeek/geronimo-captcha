@@ -1,4 +1,6 @@
-use geronimo_captcha::{CaptchaError, CaptchaManager, GenerationOptions, NoiseOptions};
+use geronimo_captcha::{
+    CaptchaError, CaptchaManager, GenerationOptions, NoiseOptions, SpriteFormat, SpriteUri,
+};
 use proptest::prelude::*;
 use std::thread::sleep;
 use std::time::Duration;
@@ -11,7 +13,9 @@ fn build_mgr(ttl: u64, cell_size: u32, jpeg_quality: u8) -> CaptchaManager {
         None,
         GenerationOptions {
             cell_size,
-            jpeg_quality,
+            sprite_format: SpriteFormat::Jpeg {
+                quality: jpeg_quality,
+            },
             limits: None,
         },
     )
@@ -28,7 +32,7 @@ fn prop_malformed_is_rejected(id: &str) -> bool {
 
 fn prop_ttl_zero_expires(idx: u8) -> bool {
     let mgr = build_mgr(0, 100, 20);
-    let ch = mgr.generate_challenge().unwrap();
+    let ch = mgr.generate_challenge::<SpriteUri>().unwrap();
     let first = mgr.verify_challenge(&ch.challenge_id, idx).unwrap_or(false);
 
     if first {
@@ -41,7 +45,7 @@ fn prop_ttl_zero_expires(idx: u8) -> bool {
 
 fn prop_oob_rejected(idx: u8) -> bool {
     let mgr = build_mgr(60, 100, 20);
-    let ch = mgr.generate_challenge().unwrap();
+    let ch = mgr.generate_challenge::<SpriteUri>().unwrap();
 
     matches!(
         mgr.verify_challenge(&ch.challenge_id, idx),
@@ -52,7 +56,7 @@ fn prop_oob_rejected(idx: u8) -> bool {
 #[cfg(feature = "test-utils")]
 fn prop_correct_index_verifies(cell: u32, q: u8, ttl: u64) -> bool {
     let mgr = build_mgr(ttl.max(1), cell, q);
-    let ch = mgr.generate_challenge().unwrap();
+    let ch = mgr.generate_challenge::<SpriteUri>().unwrap();
     mgr.verify_challenge(&ch.challenge_id, ch.correct_number)
         .unwrap_or(false)
 }
@@ -60,7 +64,7 @@ fn prop_correct_index_verifies(cell: u32, q: u8, ttl: u64) -> bool {
 #[cfg(feature = "test-utils")]
 fn prop_wrong_index_fails(cell: u32, q: u8, ttl: u64) -> bool {
     let mgr = build_mgr(ttl.max(1), cell, q);
-    let ch = mgr.generate_challenge().unwrap();
+    let ch = mgr.generate_challenge::<SpriteUri>().unwrap();
 
     // pick deterministic wrong index different from correct
     let wrong = if ch.correct_number == 9 {
