@@ -24,7 +24,8 @@ Confuses bots, but delights humans.
 
 - [x] Captcha core, image and sprite generation helpers
 - [x] In-memory challenge registry impl
-- [x] Publish crate on crates.io
+- [ ] Sprite as binary (in addition to base64)
+- [ ] WebP format (in addition to JPEG)
 - [ ] Code examples, demo webpage
 - [ ] Custom fonts and sample sets
 - [ ] Redis challenge registry impl
