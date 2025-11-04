@@ -1,7 +1,9 @@
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use image::{DynamicImage, GenericImageView, ImageFormat, Rgba};
+use crate::SpriteFormat;
+
+use image::{DynamicImage, GenericImageView, Rgba};
 use imageproc::geometric_transformations::{Interpolation, rotate_about_center};
 use rand::Rng;
+use webp::Encoder as WebPEncoder;
 
 #[derive(Clone, Copy, Default)]
 pub enum NoisePattern {
@@ -40,7 +42,8 @@ impl Default for NoiseOptions {
     }
 }
 
-/// Rotate image by arbitrary angle using imageproc (nearest-neighbor)
+/// Rotate image by arbitrary angle
+/// using imageproc (nearest-neighbor).
 pub fn rotate_image(img: &DynamicImage, angle_deg: f32) -> DynamicImage {
     if angle_deg == 0.0 {
         return img.clone();
@@ -110,10 +113,32 @@ pub fn watermark_with_noise(img: &mut DynamicImage, opts: NoiseOptions) {
     }
 }
 
-pub fn sprite_to_base64(buf: &[u8], format: ImageFormat) -> String {
-    format!(
-        "data:{};base64,{}",
-        format.to_mime_type(),
-        BASE64_STANDARD.encode(buf)
-    )
+pub fn encode_image(img: &DynamicImage, fmt: &SpriteFormat) -> (Vec<u8>, &'static str) {
+    match *fmt {
+        SpriteFormat::Jpeg { quality } => {
+            let mut buf = Vec::new();
+            let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
+
+            let rgb = img.to_rgb8();
+            let dyn_rgb = image::DynamicImage::ImageRgb8(rgb);
+
+            if let Err(_e) = enc.encode_image(&dyn_rgb) {
+                return (Vec::new(), "image/jpeg");
+            }
+
+            (buf, "image/jpeg")
+        }
+        SpriteFormat::Webp { quality, lossless } => {
+            let rgba = img.to_rgba8();
+            let enc = WebPEncoder::from_rgba(rgba.as_raw(), rgba.width(), rgba.height());
+
+            let webp = if lossless {
+                enc.encode_lossless()
+            } else {
+                enc.encode(quality as f32)
+            };
+
+            (webp.to_vec(), "image/webp")
+        }
+    }
 }
