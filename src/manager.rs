@@ -84,11 +84,15 @@ impl CaptchaManager {
 
     pub fn verify_challenge(&self, challenge_id: &str, selected_index: u8) -> Result<bool> {
         if challenge_id.is_empty() {
-            return Err(CaptchaError::InvalidInput("Challenge ID cannot be empty"));
+            return Err(CaptchaError::InvalidInput(
+                "Challenge ID cannot be empty".into(),
+            ));
         }
 
         if selected_index == 0 || selected_index > 9 {
-            return Err(CaptchaError::InvalidInput("Selected index out of bounds"));
+            return Err(CaptchaError::InvalidInput(
+                "Selected index out of bounds".into(),
+            ));
         }
 
         if let Some(registry) = &self.registry {

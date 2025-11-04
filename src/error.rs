@@ -1,29 +1,18 @@
 use crate::registry::RegistryCheckResult;
-
-use std::error::Error as StdError;
-use std::fmt;
+use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, CaptchaError>;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum CaptchaError {
-    InvalidInput(&'static str),
-    DecodeError(String),
-    EncodeError(String),
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+    #[error("decode image")]
+    Decode(#[source] image::ImageError),
+    #[error("encode image")]
+    Encode(#[source] image::ImageError),
+    #[error("registry error: {0}")]
     Registry(RegistryCheckResult),
+    #[error("internal error: {0}")]
     Internal(String),
 }
-
-impl fmt::Display for CaptchaError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CaptchaError::InvalidInput(m) => write!(f, "invalid input: {m}"),
-            CaptchaError::DecodeError(m) => write!(f, "decode error: {m}"),
-            CaptchaError::EncodeError(m) => write!(f, "encode error: {m}"),
-            CaptchaError::Registry(r) => write!(f, "registry error: {r}"),
-            CaptchaError::Internal(m) => write!(f, "internal error: {m}"),
-        }
-    }
-}
-
-impl StdError for CaptchaError {}

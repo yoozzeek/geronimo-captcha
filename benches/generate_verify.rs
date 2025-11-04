@@ -4,11 +4,7 @@ use geronimo_captcha::{
 };
 
 fn make_mgr(cell: u32, q: u8, ttl: u64) -> CaptchaManager {
-    make_mgr_with(
-        cell,
-        SpriteFormat::Jpeg { quality: q },
-        ttl,
-    )
+    make_mgr_with(cell, SpriteFormat::Jpeg { quality: q }, ttl)
 }
 
 fn make_mgr_with(cell: u32, format: SpriteFormat, ttl: u64) -> CaptchaManager {
@@ -47,22 +43,18 @@ fn bench_generate_jpeg(c: &mut Criterion) {
     for (cell, q) in configs {
         let mgr_uri = make_mgr_with(cell, SpriteFormat::Jpeg { quality: q }, 60);
         let mgr_bin = make_mgr_with(cell, SpriteFormat::Jpeg { quality: q }, 60);
-        
+
         group.throughput(Throughput::Elements(1));
         group.bench_function(format!("cell{cell}_q{q}/uri"), |b| {
             b.iter(|| {
-                let ch = mgr_uri
-                    .generate_challenge::<SpriteUri>()
-                    .unwrap();
+                let ch = mgr_uri.generate_challenge::<SpriteUri>().unwrap();
                 black_box(ch.challenge_id);
                 black_box(ch.sprite.0);
             });
         });
         group.bench_function(format!("cell{cell}_q{q}/bin"), |b| {
             b.iter(|| {
-                let ch = mgr_bin
-                    .generate_challenge::<SpriteBinary>()
-                    .unwrap();
+                let ch = mgr_bin.generate_challenge::<SpriteBinary>().unwrap();
                 black_box(ch.challenge_id);
                 black_box(ch.sprite.bytes.len());
             });
@@ -88,18 +80,14 @@ fn bench_generate_webp(c: &mut Criterion) {
         group.throughput(Throughput::Elements(1));
         group.bench_function(format!("cell{cell}_q{q}/uri"), |b| {
             b.iter(|| {
-                let ch = mgr_uri
-                    .generate_challenge::<SpriteUri>()
-                    .unwrap();
+                let ch = mgr_uri.generate_challenge::<SpriteUri>().unwrap();
                 black_box(ch.challenge_id);
                 black_box(ch.sprite.0);
             });
         });
         group.bench_function(format!("cell{cell}_q{q}/bin"), |b| {
             b.iter(|| {
-                let ch = mgr_bin
-                    .generate_challenge::<SpriteBinary>()
-                    .unwrap();
+                let ch = mgr_bin.generate_challenge::<SpriteBinary>().unwrap();
                 black_box(ch.challenge_id);
                 black_box(ch.sprite.bytes.len());
             });

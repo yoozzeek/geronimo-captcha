@@ -21,6 +21,7 @@ parallel = ["dep:rayon"]
 image = "0.25"
 imageproc = "0.25"
 webp = "0.3"
+thiserror = "2"
 rand = "0.9"
 sha2 = "0.10"
 hmac = "0.12"

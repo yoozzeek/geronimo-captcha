@@ -51,10 +51,8 @@ pub fn generate<T: SpriteTarget>(
     let rgb = sprite.to_rgb8();
     let dyn_rgb = DynamicImage::ImageRgb8(rgb);
 
-    let (sprite_buf, mime) = encode_image(&dyn_rgb, &opts.sprite_format);
-    if sprite_buf.is_empty() {
-        return Err(CaptchaError::EncodeError("encode sprite".into()));
-    }
+    let (sprite_buf, mime) =
+        encode_image(&dyn_rgb, &opts.sprite_format).map_err(CaptchaError::Encode)?;
 
     let sprite = T::from_bytes(sprite_buf, mime);
 

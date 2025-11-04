@@ -68,14 +68,11 @@ pub fn create_sprite(
         reader.limits(limits);
     }
 
-    let base = reader
-        .decode()
-        .map_err(|e| CaptchaError::DecodeError(format!("load captcha sample image: {e}")))?
-        .resize_exact(
-            opts.cell_size,
-            opts.cell_size,
-            imageops::FilterType::Nearest,
-        );
+    let base = reader.decode().map_err(CaptchaError::Decode)?.resize_exact(
+        opts.cell_size,
+        opts.cell_size,
+        imageops::FilterType::Nearest,
+    );
     let mut rng = rng();
 
     let correct_angle = 0.0;

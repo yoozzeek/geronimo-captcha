@@ -113,7 +113,10 @@ pub fn watermark_with_noise(img: &mut DynamicImage, opts: NoiseOptions) {
     }
 }
 
-pub fn encode_image(img: &DynamicImage, fmt: &SpriteFormat) -> (Vec<u8>, &'static str) {
+pub fn encode_image(
+    img: &DynamicImage,
+    fmt: &SpriteFormat,
+) -> Result<(Vec<u8>, &'static str), image::ImageError> {
     match *fmt {
         SpriteFormat::Jpeg { quality } => {
             let mut buf = Vec::new();
@@ -122,11 +125,9 @@ pub fn encode_image(img: &DynamicImage, fmt: &SpriteFormat) -> (Vec<u8>, &'stati
             let rgb = img.to_rgb8();
             let dyn_rgb = image::DynamicImage::ImageRgb8(rgb);
 
-            if let Err(_e) = enc.encode_image(&dyn_rgb) {
-                return (Vec::new(), "image/jpeg");
-            }
+            enc.encode_image(&dyn_rgb)?;
 
-            (buf, "image/jpeg")
+            Ok((buf, "image/jpeg"))
         }
         SpriteFormat::Webp { quality, lossless } => {
             let rgba = img.to_rgba8();
@@ -138,7 +139,7 @@ pub fn encode_image(img: &DynamicImage, fmt: &SpriteFormat) -> (Vec<u8>, &'stati
                 enc.encode(quality as f32)
             };
 
-            (webp.to_vec(), "image/webp")
+            Ok((webp.to_vec(), "image/webp"))
         }
     }
 }
