@@ -300,8 +300,8 @@ mod tests {
         assert_eq!(ch.sprite.mime, "image/jpeg");
         assert!(!ch.sprite.bytes.is_empty());
 
-        fs::write(Path::new("examples/exampleX.jpeg"), &ch.sprite.bytes)
-            .expect("Failed to save generated image");
+        // fs::write(Path::new("examples/exampleX.jpeg"), &ch.sprite.bytes)
+        //     .expect("Failed to save generated image");
 
         let _img = ImageReader::new(Cursor::new(&ch.sprite.bytes))
             .with_guessed_format()
@@ -327,8 +327,8 @@ mod tests {
         assert_eq!(ch.sprite.mime, "image/webp");
         assert!(!ch.sprite.bytes.is_empty());
 
-        fs::write(Path::new("examples/exampleX.webp"), &ch.sprite.bytes)
-            .expect("Failed to save generated image");
+        // fs::write(Path::new("examples/exampleX.webp"), &ch.sprite.bytes)
+        //     .expect("Failed to save generated image");
 
         let _img = ImageReader::new(Cursor::new(&ch.sprite.bytes))
             .with_guessed_format()

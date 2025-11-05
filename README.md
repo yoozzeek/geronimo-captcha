@@ -40,22 +40,22 @@ use geronimo_captcha::{
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let secret = "your-secret-key".to_string();
     let ttl_secs = 60;
+    let registry = std::sync::Arc::new(ChallengeInMemoryRegistry::new(ttl_secs, 3));
     let noise = NoiseOptions::default();
     let gen = GenerationOptions {
         cell_size: 150,
         sprite_format: SpriteFormat::Jpeg {
-            quality: 20,
+            quality: 70,
         },
         limits: None,
     };
-    let registry = std::sync::Arc::new(ChallengeInMemoryRegistry::new(ttl_secs, 3));
 
+    let secret = "your-secret-key".to_string();
     let mgr = CaptchaManager::new(secret, ttl_secs, noise, Some(registry), gen);
     let challenge = mgr.generate_challenge::<SpriteUri>()?;
 
-    // Generate sprite (as binary) if needed
+    // Generate sprite as binary if needed
     // let challenge = mgr.generate_challenge_with::<SpriteBinary>()?;
     // let img_binary = challenge.sprite.bytes;
 
@@ -79,11 +79,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Benchmarks
 
-- JPEG generate: ~6.7 ms / ~11.1 ms / ~17.5 ms
-- WebP generate: ~11.5 ms / ~21.0 ms / ~33.1 ms
-- Verify: ~2.5 µs
+### 100px/cell; q=70
 
-With feature `parallel` enabled: ~5.0 ms / ~9.6 ms / ~15.6 ms (JPEG) and ~10.7 ms / ~20.0 ms / ~32.6 ms (WebP).
+- Verify: ~2.5 µs
+- JPEG generate:
+    - ~6.7 ms
+    - ~5.0 ms (parallel)
+- WebP generate:
+    - ~11.5 ms
+    - ~10.7 ms (parallel)
 
 _Apple M3 Max_
 
@@ -91,7 +95,7 @@ How to run:
 
 ```bash
 cargo bench --bench captcha -- --noplot
-cargo bench --features parallel --bench captcha -- --noplot
+cargo bench --bench captcha --features parallel -- --noplot
 ```
 
 ## License
