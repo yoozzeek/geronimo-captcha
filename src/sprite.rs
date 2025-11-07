@@ -214,8 +214,6 @@ mod tests {
     use super::*;
     use crate::challenge::generate;
     use crate::image::NoiseOptions;
-    use std::fs;
-    use std::path::Path;
 
     const SECRET: &[u8] = b"secret-key";
 
