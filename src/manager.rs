@@ -8,7 +8,7 @@ use crate::utils::MAX_TTL_SECS;
 
 use image::RgbaImage;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use zeroize::Zeroizing;
 
 const MIN_SECRET_LEN: usize = 32;
@@ -109,7 +109,7 @@ impl CaptchaManager {
             ),
         };
 
-        info!(
+        debug!(
             cell_size = self.gen_opts.cell_size,
             format = format,
             quality = quality,
@@ -173,10 +173,10 @@ impl CaptchaManager {
                 registry
                     .mark_verified(challenge_id)
                     .inspect_err(|e| warn!("correct guess refused by registry: {e}"))?;
-                info!("captcha verified successfully");
+                debug!("captcha verified successfully");
             }
-            (true, None) => info!("captcha verified successfully"),
-            (false, _) => warn!("captcha verification failed"),
+            (true, None) => debug!("captcha verified successfully"),
+            (false, _) => debug!("captcha verification failed"),
         }
 
         Ok(valid)

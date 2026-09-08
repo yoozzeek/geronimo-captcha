@@ -10,6 +10,7 @@
 A JavaScript-free CAPTCHA for Rust.
 
 A speed bump for bulk automation, layered over server-side rate limiting. Not a wall.
+Image-only: provide your own accessible fallback.
 
 - Renders a 3×3 sprite with one correctly oriented tile
 - Random jitter, label offset, colored noise, JPEG artifacts
@@ -89,6 +90,9 @@ with `CaptchaError::InvalidInput`.
 
 Without a registry the challenge id is still authenticated, but nothing stops a client
 submitting all nine indices. Do not run in production without one.
+
+`ChallengeInMemoryRegistry` is per-process. Behind a load balancer, implement
+`ChallengeRegistry` over shared storage or pin each client to one instance.
 
 ## Choosing a sample corpus
 
