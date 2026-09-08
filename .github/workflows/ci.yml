@@ -1,36 +1,75 @@
-name: CI
+name: CI workflow
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
 jobs:
-  test:
-    name: CI checks
-    runs-on: ubuntu-latest
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: rustfmt
+      - run: cargo fmt --all --check
 
-      - name: Rustfmt
-        run: cargo fmt --all --check
+  audit:
+    name: Audit + deny
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit, cargo-deny
+      - run: cargo audit
+      - run: cargo deny check
+
+  test:
+    name: ${{ matrix.lane }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: default-features
+            features: ""
+          - lane: all-features
+            features: "--all-features"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.lane }}
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
 
       - name: Clippy
-        run: cargo clippy --all-features -- -D warnings
+        run: cargo clippy --all-targets ${{ matrix.features }} -- -D warnings
 
-      - name: Run Tests
-        run: cargo test --all-features --release
+      - name: Nextest
+        run: cargo nextest run --release ${{ matrix.features }}
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-
-      - name: Cargo audit
-        run: cargo audit
-
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
-
-      - name: Cargo deny check
-        run: cargo deny check
+      - name: Doctests
+        run: cargo test --doc --release ${{ matrix.features }}
