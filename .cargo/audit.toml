@@ -1,0 +1,7 @@
+[advisories]
+ignore = [
+    # ttf-parser is unmaintained with no safe upgrade; it reaches only the
+    # embedded, trusted Roboto-Bold.ttf via ab_glyph. Escaping it means
+    # replacing the ab_glyph font stack with skrifa.
+    "RUSTSEC-2026-0192",
+]

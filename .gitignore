@@ -1,6 +1,7 @@
 /target
 .idea
 .vscode
+.claude
 **/*.DS_Store
 
 # Fuzz build outputs
