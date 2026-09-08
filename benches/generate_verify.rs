@@ -1,95 +1,77 @@
-use criterion::{BatchSize, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use geronimo_captcha::{
-    CaptchaManager, GenerationOptions, NoiseOptions, SpriteBinary, SpriteFormat, SpriteUri,
+    CaptchaManager, DecodeLimits, GenerationOptions, NoiseOptions, SampleSet, SpriteBinary,
+    SpriteFormat, SpriteUri,
 };
+use std::hint::black_box;
 
-fn make_mgr(cell: u32, q: u8, ttl: u64) -> CaptchaManager {
-    make_mgr_with(cell, SpriteFormat::Jpeg { quality: q }, ttl)
-}
+const SECRET: &str = "bench-secret-key-at-least-32-bytes";
 
-fn make_mgr_with(cell: u32, format: SpriteFormat, ttl: u64) -> CaptchaManager {
+fn make_mgr(cell: u32, format: SpriteFormat, ttl: u64) -> CaptchaManager {
     let opts = GenerationOptions {
         cell_size: cell,
         sprite_format: format,
-        limits: None,
+        rounds: 1,
+        limits: DecodeLimits::default(),
     };
-    let noise = NoiseOptions::default();
-    let secret = String::from("bench-secret");
 
-    CaptchaManager::new(secret, ttl, noise, None, opts)
+    CaptchaManager::new(
+        SECRET.to_string(),
+        ttl,
+        NoiseOptions::default(),
+        None,
+        opts,
+        &SampleSet::demo_insecure(),
+    )
+    .expect("valid manager configuration")
+}
+
+fn expired_challenge_id() -> String {
+    let nonce = "00000000-0000-4000-8000-000000000000";
+    let code = format!("{}=", "A".repeat(43));
+
+    format!("{nonce}:1000000000:{code}")
 }
 
 fn bench_verify(c: &mut Criterion) {
-    let mgr_ok = make_mgr(150, 20, 60);
-    let mgr_expired = make_mgr(150, 20, 0);
+    let mgr = make_mgr(150, SpriteFormat::Jpeg { quality: 20 }, 60);
+    let expired = expired_challenge_id();
 
-    c.bench_function("verify_e2e/ok_vs_wrong_and_expired", |b| {
+    c.bench_function("verify_e2e/wrong_guess", |b| {
         b.iter_batched(
-            || mgr_ok.generate_challenge::<SpriteUri>().unwrap(),
-            |ch| {
-                let _ = mgr_ok.verify_challenge(&ch.challenge_id, 5); // wrong guess
-                let _ = mgr_expired.verify_challenge(&ch.challenge_id, 5); // expired fast-path
-            },
+            || mgr.generate_challenge::<SpriteUri>().unwrap(),
+            |ch| black_box(mgr.verify_challenge(&ch.challenge_id, &[5])),
             BatchSize::SmallInput,
         )
     });
+
+    c.bench_function("verify_e2e/expired_fast_path", |b| {
+        b.iter(|| black_box(mgr.verify_challenge(&expired, &[5])))
+    });
 }
 
-fn bench_generate_jpeg(c: &mut Criterion) {
-    let mut group = c.benchmark_group("generate_e2e_jpeg");
+fn bench_generate(c: &mut Criterion, name: &str, format: impl Fn(u8) -> SpriteFormat) {
+    let mut group = c.benchmark_group(name);
 
-    let configs = [(100u32, 70u8), (150u32, 70u8), (200u32, 70u8)];
-
-    for (cell, q) in configs {
-        let mgr_uri = make_mgr_with(cell, SpriteFormat::Jpeg { quality: q }, 60);
-        let mgr_bin = make_mgr_with(cell, SpriteFormat::Jpeg { quality: q }, 60);
+    for (cell, q) in [(100u32, 70u8), (150, 70), (200, 70)] {
+        let mgr_uri = make_mgr(cell, format(q), 60);
+        let mgr_bin = make_mgr(cell, format(q), 60);
 
         group.throughput(Throughput::Elements(1));
+
         group.bench_function(format!("cell{cell}_q{q}/uri"), |b| {
             b.iter(|| {
                 let ch = mgr_uri.generate_challenge::<SpriteUri>().unwrap();
                 black_box(ch.challenge_id);
-                black_box(ch.sprite.0);
+                black_box(ch.sprites);
             });
         });
+
         group.bench_function(format!("cell{cell}_q{q}/bin"), |b| {
             b.iter(|| {
                 let ch = mgr_bin.generate_challenge::<SpriteBinary>().unwrap();
                 black_box(ch.challenge_id);
-                black_box(ch.sprite.bytes.len());
-            });
-        });
-    }
-
-    group.finish();
-}
-
-fn bench_generate_webp(c: &mut Criterion) {
-    let mut group = c.benchmark_group("generate_e2e_webp");
-
-    let configs = [(100u32, 70u8), (150u32, 70u8), (200u32, 70u8)];
-
-    for (cell, q) in configs {
-        let fmt = SpriteFormat::Webp {
-            quality: q,
-            lossless: false,
-        };
-        let mgr_uri = make_mgr_with(cell, fmt, 60);
-        let mgr_bin = make_mgr_with(cell, fmt, 60);
-
-        group.throughput(Throughput::Elements(1));
-        group.bench_function(format!("cell{cell}_q{q}/uri"), |b| {
-            b.iter(|| {
-                let ch = mgr_uri.generate_challenge::<SpriteUri>().unwrap();
-                black_box(ch.challenge_id);
-                black_box(ch.sprite.0);
-            });
-        });
-        group.bench_function(format!("cell{cell}_q{q}/bin"), |b| {
-            b.iter(|| {
-                let ch = mgr_bin.generate_challenge::<SpriteBinary>().unwrap();
-                black_box(ch.challenge_id);
-                black_box(ch.sprite.bytes.len());
+                black_box(ch.sprites);
             });
         });
     }
@@ -98,8 +80,13 @@ fn bench_generate_webp(c: &mut Criterion) {
 }
 
 pub fn criterion_benches(c: &mut Criterion) {
-    bench_generate_jpeg(c);
-    bench_generate_webp(c);
+    bench_generate(c, "generate_e2e_jpeg", |quality| SpriteFormat::Jpeg {
+        quality,
+    });
+    bench_generate(c, "generate_e2e_webp", |quality| SpriteFormat::Webp {
+        quality,
+        lossless: false,
+    });
     bench_verify(c);
 }
 
