@@ -1,26 +1,44 @@
-use crate::image::rotate_image;
+use crate::image::warp_tile;
 use crate::{CaptchaError, GenerationOptions};
 
-use ab_glyph::{FontArc, PxScale};
+use ab_glyph::{FontArc, InvalidFont, PxScale};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use image::{DynamicImage, GenericImage, ImageBuffer, ImageReader, Limits, Rgba, imageops};
+use image::{GenericImage, ImageBuffer, ImageReader, Limits, Rgba, RgbaImage, imageops};
 use imageproc::drawing::draw_text_mut;
-use once_cell::sync::Lazy;
 use rand::prelude::SliceRandom;
-use rand::{Rng, rng};
+use rand::rngs::ThreadRng;
+use rand::{RngExt, rng};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use std::io::Cursor;
+use std::sync::LazyLock;
 
-static FONT: Lazy<FontArc> = Lazy::new(|| {
-    FontArc::try_from_slice(include_bytes!("../assets/Roboto-Bold.ttf"))
-        .expect("embedded font should be valid")
-});
+static FONT: LazyLock<Result<FontArc, InvalidFont>> =
+    LazyLock::new(|| FontArc::try_from_slice(include_bytes!("../assets/Roboto-Bold.ttf")));
 
+pub(crate) const SPRITE_BG: Rgba<u8> = Rgba([255, 255, 255, 255]);
+
+const COLS: u32 = 3;
+const ROWS: u32 = 3;
+const SPACING: u32 = 4;
+const TILES: usize = (COLS * ROWS) as usize;
+
+const UPRIGHT_JITTER_DEG: f32 = 5.0;
+const MIN_TILE_SCALE: f32 = 0.5;
+const MAX_TILE_SCALE: f32 = 0.8;
+
+const INCORRECT_ANGLES: [f32; 11] = [
+    38.0, 88.0, 114.0, 138.0, 176.0, 200.0, 229.0, 255.0, 278.0, 314.0, 320.0,
+];
+
+const LABELS: [&str; TILES] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+
+/// Destination for the encoded sprite bytes.
 pub trait SpriteTarget: Sized {
     fn from_bytes(bytes: Vec<u8>, mime: &'static str) -> Self;
 }
 
+/// Sprite as a `data:` URI, ready for `<img src>`.
 pub struct SpriteUri(pub String);
 
 impl SpriteTarget for SpriteUri {
@@ -29,6 +47,7 @@ impl SpriteTarget for SpriteUri {
     }
 }
 
+/// Sprite as raw encoded bytes plus its MIME type.
 pub struct SpriteBinary {
     pub bytes: Vec<u8>,
     pub mime: &'static str,
@@ -52,286 +71,437 @@ impl Default for SpriteFormat {
     }
 }
 
-pub fn create_sprite(
-    base_buf: &[u8],
-    opts: &GenerationOptions,
-) -> crate::Result<(DynamicImage, u8)> {
-    let mut reader = ImageReader::with_format(Cursor::new(base_buf), image::ImageFormat::Jpeg);
-    if let Some(limits) = opts.limits.clone() {
-        reader.limits(limits);
-    } else {
-        let mut limits = Limits::default();
-        limits.max_image_width = Some(4096);
-        limits.max_image_height = Some(4096);
-        limits.max_alloc = Some(128 * 1024 * 1024);
-
-        reader.limits(limits);
+impl SpriteFormat {
+    pub(crate) fn quality(&self) -> u8 {
+        match *self {
+            SpriteFormat::Jpeg { quality } => quality,
+            SpriteFormat::Webp { quality, .. } => quality,
+        }
     }
+}
 
-    let base = reader.decode().map_err(CaptchaError::Decode)?.resize_exact(
-        opts.cell_size,
-        opts.cell_size,
-        imageops::FilterType::Nearest,
-    );
+#[derive(Clone, Copy)]
+struct Tile {
+    angle: f32,
+    scale: f32,
+    flip: bool,
+    correct: bool,
+}
+
+pub fn decode_base(
+    base_buf: &[u8],
+    format: image::ImageFormat,
+    opts: &GenerationOptions,
+) -> crate::Result<RgbaImage> {
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(opts.limits.max_width);
+    limits.max_image_height = Some(opts.limits.max_height);
+    limits.max_alloc = Some(opts.limits.max_alloc);
+
+    let mut reader = ImageReader::with_format(Cursor::new(base_buf), format);
+    reader.limits(limits);
+
+    Ok(reader
+        .decode()
+        .map_err(CaptchaError::Decode)?
+        .resize_exact(
+            opts.cell_size,
+            opts.cell_size,
+            imageops::FilterType::Nearest,
+        )
+        .into_rgba8())
+}
+
+pub fn create_sprite(base: &RgbaImage, opts: &GenerationOptions) -> crate::Result<(RgbaImage, u8)> {
+    let font = font()?;
     let mut rng = rng();
 
-    let correct_angle = 0.0;
-    let incorrect_angles = [
-        38.0, 88.0, 114.0, 138.0, 176.0, 200.0, 229.0, 255.0, 278.0, 314.0, 320.0,
-    ];
+    let mut wrong = INCORRECT_ANGLES;
+    wrong.shuffle(&mut rng);
 
-    let mut angles = Vec::with_capacity(1 + incorrect_angles.len());
-    angles.push(correct_angle);
-    angles.extend_from_slice(&incorrect_angles);
+    let mut tiles = [Tile {
+        angle: 0.0,
+        scale: 0.0,
+        flip: false,
+        correct: false,
+    }; TILES];
 
-    let precomputed: Vec<(f32, image::RgbaImage)> = {
-        #[cfg(feature = "parallel")]
-        {
-            angles
-                .par_iter()
-                .map(|&a| (a, rotate_image(&base, a).to_rgba8()))
-                .collect()
-        }
-        #[cfg(not(feature = "parallel"))]
-        {
-            angles
-                .iter()
-                .map(|&a| (a, rotate_image(&base, a).to_rgba8()))
-                .collect()
-        }
-    };
-
-    let mut tiles = vec![(true, correct_angle)];
-    let mut others = incorrect_angles.to_vec();
-
-    others.shuffle(&mut rng);
-
-    for &angle in others.iter().take(8) {
-        tiles.push((false, angle));
+    for (i, tile) in tiles.iter_mut().enumerate() {
+        tile.angle = match i {
+            0 => rng.random_range(-UPRIGHT_JITTER_DEG..=UPRIGHT_JITTER_DEG),
+            _ => wrong[i - 1],
+        };
+        tile.scale = rng.random_range(MIN_TILE_SCALE..=MAX_TILE_SCALE);
+        tile.flip = rng.random_bool(0.5);
+        tile.correct = i == 0;
     }
 
     tiles.shuffle(&mut rng);
 
-    let font = &*FONT;
-    let cols = 3;
-    let rows = 3;
-    let spacing = 4;
-    let sprite_width = cols * opts.cell_size + (cols - 1) * spacing;
-    let sprite_height = rows * opts.cell_size + (rows - 1) * spacing;
+    let sprite_width = COLS * opts.cell_size + (COLS - 1) * SPACING;
+    let sprite_height = ROWS * opts.cell_size + (ROWS - 1) * SPACING;
 
-    let mut sprite_buf =
-        ImageBuffer::from_pixel(sprite_width, sprite_height, Rgba([255, 255, 255, 255]));
-
+    let mut sprite = ImageBuffer::from_pixel(sprite_width, sprite_height, SPRITE_BG);
     let mut correct_number = 0;
 
-    for (i, (is_correct, angle)) in tiles.iter().enumerate() {
-        // Create and draw each tile
-        let tile_scale = 0.5 + rng.random_range(0.0..0.3);
-        let shrink_size = (opts.cell_size as f32 * tile_scale) as u32;
-        let rotated = precomputed
-            .iter()
-            .find(|(a, _)| (*a - *angle).abs() < f32::EPSILON)
-            .map(|(_, img)| img)
-            .ok_or_else(|| CaptchaError::Internal("missing precomputed angle".into()))?;
+    #[cfg(feature = "parallel")]
+    let rendered = tiles
+        .par_iter()
+        .map(|tile| {
+            let mut out = RgbaImage::new(0, 0);
+            render_tile(base, *tile, opts.cell_size, &mut out).map(|()| out)
+        })
+        .collect::<crate::Result<Vec<_>>>()?;
 
-        let mut tile = image::imageops::resize(
-            rotated,
-            shrink_size,
-            shrink_size,
-            imageops::FilterType::Lanczos3,
-        );
+    #[cfg(not(feature = "parallel"))]
+    let mut scratch = RgbaImage::new(0, 0);
 
-        let should_flip = rng.random_bool(0.5);
-        if should_flip {
-            tile = imageops::flip_horizontal(&tile);
-        }
+    for (i, tile) in tiles.iter().enumerate() {
+        #[cfg(feature = "parallel")]
+        let rendered = rendered
+            .get(i)
+            .ok_or_else(|| CaptchaError::Internal(format!("tile {i} was not rendered")))?;
 
-        let col = i as u32 % cols;
-        let row = i as u32 / cols;
+        #[cfg(not(feature = "parallel"))]
+        let rendered = {
+            render_tile(base, *tile, opts.cell_size, &mut scratch)?;
+            &scratch
+        };
 
-        let base_x = col * (opts.cell_size + spacing);
-        let base_y = row * (opts.cell_size + spacing);
+        place_tile(&mut sprite, rendered, i, opts.cell_size, &mut rng, font)?;
 
-        let offset_x = (opts.cell_size - shrink_size) / 2;
-        let offset_y = (opts.cell_size - shrink_size) / 2;
-
-        let jitter_limit_x = offset_x as i32;
-        let jitter_limit_y = offset_y as i32;
-
-        let jitter_x = rng.random_range(-jitter_limit_x..=jitter_limit_x);
-        let jitter_y = rng.random_range(-jitter_limit_y..=jitter_limit_y);
-
-        let draw_x = (base_x as i32 + offset_x as i32 + jitter_x) as u32;
-        let draw_y = (base_y as i32 + offset_y as i32 + jitter_y) as u32;
-
-        sprite_buf
-            .copy_from(&tile, draw_x, draw_y)
-            .map_err(|e| CaptchaError::Internal(format!("copy tile into sprite buffer: {e}")))?;
-
-        // Draw the number label
-        let label = format!("{}", i + 1);
-
-        let label_x = draw_x.saturating_add(shrink_size).saturating_sub(16);
-        let label_y = draw_y.saturating_add(shrink_size).saturating_sub(16);
-
-        let scale_factor = rng.random_range(0.13..=0.17);
-        let scale = PxScale::from(opts.cell_size as f32 * scale_factor);
-
-        let color = Rgba([
-            rng.random_range(0..100),
-            rng.random_range(0..100),
-            rng.random_range(0..100),
-            255,
-        ]);
-
-        let offset_x = rng.random_range(0..=3);
-        let offset_y = rng.random_range(0..=3);
-
-        draw_text_mut(
-            &mut sprite_buf,
-            color,
-            (label_x + offset_x) as i32,
-            (label_y + offset_y) as i32,
-            scale,
-            &font,
-            &label,
-        );
-
-        if *is_correct {
+        if tile.correct {
             correct_number = (i + 1) as u8;
         }
     }
 
-    Ok((DynamicImage::ImageRgba8(sprite_buf), correct_number))
+    Ok((sprite, correct_number))
+}
+
+fn render_tile(
+    base: &RgbaImage,
+    tile: Tile,
+    cell_size: u32,
+    out: &mut RgbaImage,
+) -> crate::Result<()> {
+    let size = (cell_size as f32 * tile.scale) as u32;
+
+    let mut raw = std::mem::replace(out, RgbaImage::new(0, 0)).into_raw();
+    raw.resize(size as usize * size as usize * 4, 0);
+
+    *out = RgbaImage::from_raw(size, size, raw)
+        .ok_or_else(|| CaptchaError::Internal("tile buffer does not fit its dimensions".into()))?;
+
+    warp_tile(base, tile.angle, tile.flip, SPRITE_BG, out);
+
+    Ok(())
+}
+
+fn place_tile(
+    sprite: &mut RgbaImage,
+    tile: &RgbaImage,
+    index: usize,
+    cell_size: u32,
+    rng: &mut ThreadRng,
+    font: &FontArc,
+) -> crate::Result<()> {
+    let size = tile.width();
+
+    let col = index as u32 % COLS;
+    let row = index as u32 / COLS;
+
+    let base_x = col * (cell_size + SPACING);
+    let base_y = row * (cell_size + SPACING);
+
+    let offset = (cell_size - size) / 2;
+    let jitter_limit = offset as i32;
+
+    let draw_x =
+        (base_x + offset).saturating_add_signed(rng.random_range(-jitter_limit..=jitter_limit));
+    let draw_y =
+        (base_y + offset).saturating_add_signed(rng.random_range(-jitter_limit..=jitter_limit));
+
+    sprite
+        .copy_from(tile, draw_x, draw_y)
+        .map_err(|e| CaptchaError::Internal(format!("copy tile into sprite buffer: {e}")))?;
+
+    let label_x = draw_x.saturating_add(size).saturating_sub(16);
+    let label_y = draw_y.saturating_add(size).saturating_sub(16);
+
+    let scale = PxScale::from(cell_size as f32 * rng.random_range(0.13..=0.17));
+    let color = Rgba([
+        rng.random_range(0..100),
+        rng.random_range(0..100),
+        rng.random_range(0..100),
+        255,
+    ]);
+
+    draw_text_mut(
+        sprite,
+        color,
+        (label_x + rng.random_range(0..=3)) as i32,
+        (label_y + rng.random_range(0..=3)) as i32,
+        scale,
+        font,
+        LABELS[index],
+    );
+
+    Ok(())
 }
 
 fn sprite_to_base64(buf: &[u8], mime: &str) -> String {
-    format!("data:{};base64,{}", mime, BASE64_STANDARD.encode(buf))
+    const PREFIX: &str = "data:";
+    const INFIX: &str = ";base64,";
+
+    let mut uri =
+        String::with_capacity(PREFIX.len() + mime.len() + INFIX.len() + buf.len().div_ceil(3) * 4);
+
+    uri.push_str(PREFIX);
+    uri.push_str(mime);
+    uri.push_str(INFIX);
+
+    BASE64_STANDARD.encode_string(buf, &mut uri);
+
+    uri
+}
+
+fn font() -> crate::Result<&'static FontArc> {
+    FONT.as_ref()
+        .map_err(|e| CaptchaError::Internal(format!("load embedded font: {e}")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::challenge::generate;
+    use crate::challenge::{DecodeLimits, generate};
     use crate::image::NoiseOptions;
 
-    const SECRET: &[u8] = b"secret-key";
+    const SECRET: &[u8] = b"unit-test-secret-key-32-bytes-min!!";
 
-    fn load_sample_image() -> Vec<u8> {
-        include_bytes!("../assets/sample1.jpg").to_vec()
+    fn opts(cell_size: u32, sprite_format: SpriteFormat) -> GenerationOptions {
+        GenerationOptions {
+            cell_size,
+            sprite_format,
+            rounds: 1,
+            limits: DecodeLimits::default(),
+        }
     }
 
-    #[test]
-    fn test_sprite_prefix_jpeg_and_decode() {
-        let base = load_sample_image();
-        let opts = GenerationOptions {
-            cell_size: 120,
-            sprite_format: SpriteFormat::Jpeg { quality: 60 },
-            limits: None,
-        };
+    fn load_base(opts: &GenerationOptions) -> RgbaImage {
+        decode_base(
+            include_bytes!("../assets/sample1.jpg"),
+            image::ImageFormat::Jpeg,
+            opts,
+        )
+        .expect("decode sample")
+    }
 
-        let ch = generate::<SpriteUri>(&base, SECRET, &opts, NoiseOptions::default())
-            .expect("jpeg generation failed");
-        assert!(ch.sprite.0.starts_with("data:image/jpeg;base64,"));
-
-        let data_b64 = ch
-            .sprite
-            .0
-            .split_once(',')
-            .map(|x| x.1)
-            .expect("missing data uri payload");
-        let bytes = BASE64_STANDARD
-            .decode(data_b64)
-            .expect("base64 decode jpeg");
-
-        let _img = ImageReader::new(Cursor::new(bytes))
+    fn decode(bytes: &[u8]) {
+        ImageReader::new(Cursor::new(bytes))
             .with_guessed_format()
-            .expect("guess jpeg format")
+            .expect("guess format")
             .decode()
-            .expect("decode jpeg");
+            .expect("decode sprite");
+    }
+
+    fn payload(uri: &str) -> Vec<u8> {
+        let b64 = uri.split_once(',').map(|x| x.1).expect("data uri payload");
+        BASE64_STANDARD.decode(b64).expect("base64 decode")
     }
 
     #[test]
-    fn test_sprite_prefix_webp_and_decode() {
-        let base = load_sample_image();
-        let opts = GenerationOptions {
-            cell_size: 120,
-            sprite_format: SpriteFormat::Webp {
+    fn sprite_prefix_jpeg_and_decode() {
+        let o = opts(120, SpriteFormat::Jpeg { quality: 60 });
+        let base = load_base(&o);
+
+        let ch = generate::<SpriteUri>(
+            std::slice::from_ref(&base),
+            SECRET,
+            &o,
+            NoiseOptions::default(),
+        )
+        .expect("jpeg generation failed");
+
+        assert_eq!(ch.sprites.len(), 1);
+        assert!(ch.sprites[0].0.starts_with("data:image/jpeg;base64,"));
+
+        decode(&payload(&ch.sprites[0].0));
+    }
+
+    #[test]
+    fn sprite_prefix_webp_and_decode() {
+        let o = opts(
+            120,
+            SpriteFormat::Webp {
                 quality: 75,
                 lossless: false,
             },
-            limits: None,
-        };
+        );
 
-        let ch = generate::<SpriteUri>(&base, SECRET, &opts, NoiseOptions::default())
-            .expect("webp generation failed");
-        assert!(ch.sprite.0.starts_with("data:image/webp;base64,"));
+        let base = load_base(&o);
+        let ch = generate::<SpriteUri>(
+            std::slice::from_ref(&base),
+            SECRET,
+            &o,
+            NoiseOptions::default(),
+        )
+        .expect("webp generation failed");
 
-        let data_b64 = ch
-            .sprite
-            .0
-            .split_once(',')
-            .map(|x| x.1)
-            .expect("missing data uri payload");
-        let bytes = BASE64_STANDARD
-            .decode(data_b64)
-            .expect("base64 decode webp");
+        assert!(ch.sprites[0].0.starts_with("data:image/webp;base64,"));
 
-        let _img = ImageReader::new(Cursor::new(bytes))
-            .with_guessed_format()
-            .expect("guess webp format")
-            .decode()
-            .expect("decode webp");
+        decode(&payload(&ch.sprites[0].0));
     }
 
     #[test]
-    fn test_sprite_binary_jpeg_and_decode() {
-        let base = load_sample_image();
-        let opts = GenerationOptions {
-            cell_size: 150,
-            sprite_format: SpriteFormat::Jpeg { quality: 70 },
-            limits: None,
-        };
-        let ch = generate::<SpriteBinary>(&base, SECRET, &opts, NoiseOptions::default())
-            .expect("jpeg binary generation failed");
+    fn sprite_binary_jpeg_and_decode() {
+        let o = opts(150, SpriteFormat::Jpeg { quality: 70 });
+        let base = load_base(&o);
 
-        assert_eq!(ch.sprite.mime, "image/jpeg");
-        assert!(!ch.sprite.bytes.is_empty());
+        let ch = generate::<SpriteBinary>(
+            std::slice::from_ref(&base),
+            SECRET,
+            &o,
+            NoiseOptions::default(),
+        )
+        .expect("jpeg binary generation failed");
 
-        // fs::write(Path::new("examples/exampleX.jpeg"), &ch.sprite.bytes)
-        //     .expect("Failed to save generated image");
+        assert_eq!(ch.sprites[0].mime, "image/jpeg");
+        assert!(!ch.sprites[0].bytes.is_empty());
 
-        let _img = ImageReader::new(Cursor::new(&ch.sprite.bytes))
-            .with_guessed_format()
-            .expect("guess jpeg format")
-            .decode()
-            .expect("decode jpeg binary");
+        decode(&ch.sprites[0].bytes);
     }
 
     #[test]
-    fn test_sprite_binary_webp_and_decode() {
-        let base = load_sample_image();
-        let opts = GenerationOptions {
-            cell_size: 150,
-            sprite_format: SpriteFormat::Webp {
+    fn sprite_binary_webp_and_decode() {
+        let o = opts(
+            150,
+            SpriteFormat::Webp {
                 quality: 70,
                 lossless: false,
             },
-            limits: None,
-        };
-        let ch = generate::<SpriteBinary>(&base, SECRET, &opts, NoiseOptions::default())
-            .expect("webp binary generation failed");
+        );
 
-        assert_eq!(ch.sprite.mime, "image/webp");
-        assert!(!ch.sprite.bytes.is_empty());
+        let base = load_base(&o);
+        let ch = generate::<SpriteBinary>(
+            std::slice::from_ref(&base),
+            SECRET,
+            &o,
+            NoiseOptions::default(),
+        )
+        .expect("webp binary generation failed");
 
-        // fs::write(Path::new("examples/exampleX.webp"), &ch.sprite.bytes)
-        //     .expect("Failed to save generated image");
+        assert_eq!(ch.sprites[0].mime, "image/webp");
+        assert!(!ch.sprites[0].bytes.is_empty());
 
-        let _img = ImageReader::new(Cursor::new(&ch.sprite.bytes))
-            .with_guessed_format()
-            .expect("guess webp format")
-            .decode()
-            .expect("decode webp binary");
+        decode(&ch.sprites[0].bytes);
+    }
+
+    #[test]
+    fn tile_silhouette_is_angle_independent() {
+        let base_size = 64;
+        let fill = Rgba([10, 20, 30, 255]);
+        let base = RgbaImage::from_pixel(base_size, base_size, fill);
+
+        let size = 41;
+        let corners = [
+            (0, 0),
+            (size - 1, 0),
+            (0, size - 1),
+            (size - 1, size - 1),
+            (size / 2, 0),
+        ];
+
+        let mut areas = Vec::new();
+        for angle in [0.0, 3.0, -4.9, 38.0, 88.0, 138.0, 176.0, 278.0, 320.0] {
+            for flip in [false, true] {
+                let mut tile = RgbaImage::new(size, size);
+                warp_tile(&base, angle, flip, SPRITE_BG, &mut tile);
+
+                for (x, y) in corners {
+                    assert_eq!(
+                        *tile.get_pixel(x, y),
+                        SPRITE_BG,
+                        "angle {angle} flip {flip} leaves tile content at ({x}, {y})"
+                    );
+                }
+
+                assert_eq!(*tile.get_pixel(size / 2, size / 2), fill);
+
+                areas.push(tile.pixels().filter(|p| **p != SPRITE_BG).count());
+            }
+        }
+
+        assert!(
+            areas.windows(2).all(|w| w[0] == w[1]),
+            "tile area varies with angle or flip, silhouette leaks the answer: {areas:?}"
+        );
+    }
+
+    #[test]
+    fn render_tile_reuses_scratch_capacity() {
+        let o = opts(80, SpriteFormat::Jpeg { quality: 70 });
+        let base = load_base(&o);
+
+        let mut scratch = RgbaImage::new(0, 0);
+        let mut capacities = Vec::new();
+
+        for scale in [MAX_TILE_SCALE, MIN_TILE_SCALE, 0.65, MAX_TILE_SCALE] {
+            let tile = Tile {
+                angle: 38.0,
+                scale,
+                flip: false,
+                correct: false,
+            };
+
+            render_tile(&base, tile, o.cell_size, &mut scratch).expect("render");
+
+            let expected = (o.cell_size as f32 * scale) as u32;
+            assert_eq!(scratch.dimensions(), (expected, expected));
+
+            capacities.push(scratch.as_raw().capacity());
+        }
+
+        assert!(
+            capacities.windows(2).all(|w| w[0] == w[1]),
+            "scratch reallocated between tiles: {capacities:?}"
+        );
+    }
+
+    #[test]
+    fn noise_blends_without_writing_alpha() {
+        let o = opts(80, SpriteFormat::Jpeg { quality: 70 });
+        let base = load_base(&o);
+
+        let (sprite, _) = create_sprite(&base, &o).expect("sprite");
+
+        let mut noised = sprite.clone();
+        crate::image::watermark_with_noise(&mut noised, NoiseOptions::default());
+
+        let alpha_before: Vec<u8> = sprite.pixels().map(|p| p.0[3]).collect();
+        let alpha_after: Vec<u8> = noised.pixels().map(|p| p.0[3]).collect();
+
+        assert_eq!(
+            alpha_before, alpha_after,
+            "noise must blend, never write into the alpha channel"
+        );
+        assert_ne!(
+            sprite.as_raw(),
+            noised.as_raw(),
+            "noise must actually modify the sprite"
+        );
+    }
+
+    #[test]
+    fn correct_number_is_within_grid() {
+        let o = opts(80, SpriteFormat::Jpeg { quality: 70 });
+        let base = load_base(&o);
+
+        for _ in 0..16 {
+            let (_, correct) = create_sprite(&base, &o).expect("sprite");
+            assert!(
+                (1..=9).contains(&correct),
+                "correct number {correct} out of grid"
+            );
+        }
     }
 }
